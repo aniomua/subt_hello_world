@@ -9,8 +9,9 @@
 # Ubuntu 18.04 with CUDA and OpenGL support
 # https://hub.docker.com/r/nvidia/cudagl/
 # https://github.com/NVIDIA/nvidia-docker/wiki/CUDA
-FROM nvidia/cudagl:10.1-devel-ubuntu18.04
+FROM nvidia/cudagl:11.3.1-devel-ubuntu18.04
 
+          
 # setup timezone
 RUN echo 'Etc/UTC' > /etc/timezone && \
   ln -s /usr/share/zoneinfo/Etc/UTC /etc/localtime \
@@ -21,6 +22,28 @@ RUN echo 'Etc/UTC' > /etc/timezone && \
 # setup sources.list and keys
 RUN echo "deb [trusted=yes] http://packages.ros.org/ros/ubuntu bionic main" > /etc/apt/sources.list.d/ros1-latest.list \
   && apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C1CF6E31E6BADE8868B172B4F42ED6FBAB17C654
+
+  RUN mv /etc/apt/sources.list /etc/apt/sources.list.bak
+  RUN echo "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ bionic main restricted universe multiverse" >> /etc/apt/sources.list
+  RUN echo "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ bionic-updates main restricted universe multiverse" >>/etc/apt/sources.list
+  RUN echo "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ bionic-backports main restricted universe multiverse" >>/etc/apt/sources.list
+  RUN echo "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ bionic-security main restricted universe multiverse" >>/etc/apt/sources.list
+  RUN apt-get update && \
+  apt-get install -y python3-pip
+  RUN pip3 install rosdepc -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 配置 UTF-8 环境
+RUN apt-get update && \
+    apt-get install -y locales && \
+    sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && \
+    locale-gen en_US.UTF-8 && \
+    update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+ENV PYTHONIOENCODING=utf-8
+
+
 
 # install ROS (including dependencies for building packages) and other packages
 RUN apt-get -qq update && apt-get -q -y install \
@@ -40,9 +63,10 @@ RUN apt-get -qq update && apt-get -q -y install \
   tmux \
   vim \
   wget \
-  && rosdep init \
+  && rosdepc init \
   && rm -rf /var/lib/apt/lists/* \
   && apt-get -qq clean
+
 
 # sdformat8-sdf conflicts with sdformat-sdf installed from gazebo
 # so we need to workaround this using a force overwrite
@@ -63,7 +87,7 @@ ARG user_id
 ENV USERNAME developer
 RUN apt-get -qq update && apt-get -q -y install sudo \
   && rm -rf /var/lib/apt/lists/* \
-  && useradd -U --uid ${user_id} -ms /bin/bash ${USERNAME} \
+  && useradd -U --uid 1000 -ms /bin/bash ${USERNAME} \
   && echo "$USERNAME:$USERNAME" | chpasswd \
   && adduser $USERNAME sudo \
   && echo "$USERNAME ALL=NOPASSWD: ALL" >> /etc/sudoers.d/${USERNAME}
@@ -71,7 +95,7 @@ RUN apt-get -qq update && apt-get -q -y install sudo \
 # Commands below run as the user $USERNAME
 USER ${USERNAME}
 
-RUN rosdep update
+RUN rosdepc update
 
 # save filenames and paths as either args (for repreated use in this Dockerfile)
 # or environment variables (for use in other dockerfiles and/or container shell instances)
@@ -92,21 +116,40 @@ RUN mkdir -p ${DEPS_WS_PATH}/src \
   ${DEPS_WS_PATH}/src
 # build the dependencies
 WORKDIR ${DEPS_WS_PATH}
+
+
 RUN [ "/bin/bash" , "-c" , \
   "source /opt/ros/melodic/setup.bash \
   && sudo apt-get -qq update \
-  && rosdep install --from-paths src --ignore-src -r -y \
+  && rosdepc install --from-paths src --ignore-src -r -y \
     --skip-keys=ignition-transport9 \
     --skip-keys=ignition-gazebo4 \
     --skip-keys=ignition-math6 \
     --skip-keys=ignition-msgs6 \
     --skip-keys=ignition-plugin1 \
     --skip-keys=ignition-common3 \
-    --skip-keys=ignition-launch3 \
-  && catkin_make  -DCMAKE_BUILD_TYPE=Release install \
+    --skip-keys=ignition-launch3" ]
+  RUN  sudo apt-get -q -y install ros-melodic-rotors-control
+  RUN  sudo apt-get -q -y install ros-melodic-image-geometry
+  RUN  sudo apt-get -q -y install ros-melodic-tf2-geometry-msgs
+  RUN sudo apt-get -q -y install ros-melodic-control-toolbox 
+  RUN sudo apt-get -q -y install ros-melodic-costmap-2d 
+  RUN sudo apt-get -q -y install ros-melodic-lms1xx 
+  RUN sudo apt-get -q -y install ros-melodic-robot-localization 
+  RUN sudo apt-get -q -y install ros-melodic-twist-mux 
+  RUN sudo apt-get -q -y install ros-melodic-move-base-msgs 
+  ENV CUDA_ARCH_BIN=8.9          
+  ENV CUDA_ARCH_PTX=8.9
+  RUN sed -i \
+  -e 's/-gencode arch=compute_30,code=sm_30/# &/' \
+  -e 's/-gencode arch=compute_35,code=sm_35/# &/' \
+  ${DEPS_WS_PATH}/src/darknet_ros/darknet_ros/CMakeLists.txt
+  RUN [ "/bin/bash" , "-c" , \
+  "source /opt/ros/melodic/setup.bash \
+  && catkin_make  -DCMAKE_BUILD_TYPE=Release -DCUDA_ARCH_BIN=${CUDA_ARCH_BIN} \
+      -DCUDA_ARCH_PTX=${CUDA_ARCH_PTX}  install \
   && sudo rm -rf /var/lib/apt/lists/* \
   && sudo apt-get -qq clean" ]
-
 # set up a workspace for source code (this will be loaded as a volume)
 RUN mkdir -p ${SOLUTION_WS_PATH}/src
 

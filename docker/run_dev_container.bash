@@ -84,5 +84,5 @@ docker run -it \
   --name subt_dev_container \
   $DOCKER_OPTS \
   subt_dev \
-  # ${@:2}
-  #-v "/usr/local/cuda-10.1:/usr/local/cuda-10.1" \
+# ${@:2}
+#-v "/usr/local/cuda-10.1:/usr/local/cuda-10.1" \
